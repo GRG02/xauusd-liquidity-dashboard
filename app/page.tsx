@@ -5,7 +5,7 @@ import { supabase } from '@/app/lib/supabaseClient';
 import {
   ComposedChart, Bar, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import { ArrowLeft, ArrowRight, RefreshCw, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RefreshCw } from 'lucide-react';
 
 // --- TRADINGVIEW WIDGET COMPONENT ---
 const TradingViewWidget = () => {
@@ -89,7 +89,7 @@ export default function LiquidityDashboard() {
     const minP = centerPrice - priceRange;
     const maxP = centerPrice + priceRange;
     
-    // ระยะห่างที่ลอยออกไป (ลดเหลือ 1.0 ตามโจทย์)
+    // ระยะที่คลื่นลอยออกไป (Offset)
     const sideOffset = 1.0; 
 
     rawPayload.pos.buckets_data?.forEach((b: any) => {
@@ -103,11 +103,11 @@ export default function LiquidityDashboard() {
           posShort: pS,
           posLongWave: sideOffset + pL, 
           posShortWave: -sideOffset + pS,
-          rightBase: sideOffset,
-          leftBase: -sideOffset,
+          rightBase: sideOffset, // สำหรับวาดเส้นฐานฝั่งขวา
+          leftBase: -sideOffset,  // สำหรับวาดเส้นฐานฝั่งซ้าย
           ordLong: 0, 
           ordShort: 0,
-          ordLongWave: sideOffset, // เตรียมค่าไว้
+          ordLongWave: sideOffset, 
           ordShortWave: -sideOffset
         });
       }
@@ -182,9 +182,17 @@ export default function LiquidityDashboard() {
           <div className="h-[1px] bg-slate-700 my-2" />
           {payload.map((entry: any, index: number) => {
             const val = Math.abs(entry.value).toFixed(2);
-            if (val === "0.00") return null;
-            if (entry.dataKey.includes('Wave')) return null; 
-
+            if (val === "0.00" || entry.dataKey.includes('Base')) return null;
+            if (entry.dataKey.includes('Wave')) {
+              const actualVal = Math.abs(parseFloat(val) - 1.0).toFixed(2);
+              if (actualVal === "0.00") return null;
+              return (
+                <p key={index} style={{ color: entry.color }} className="flex justify-between gap-4">
+                  <span>Wave ({entry.dataKey.includes('Long') ? "Buy" : "Sell"}):</span>
+                  <span className="font-bold">{actualVal}%</span>
+                </p>
+              );
+            }
             return (
               <p key={index} style={{ color: entry.color }} className="flex justify-between gap-4">
                 <span>{entry.dataKey.includes('pos') ? "Position" : "Order"} ({entry.dataKey.includes('Long') ? "Buy" : "Sell"}):</span>
@@ -200,7 +208,6 @@ export default function LiquidityDashboard() {
 
   return (
     <div className="flex flex-col h-screen bg-[#020617] text-slate-200 select-none overflow-hidden font-sans">
-      {/* --- HEADER --- */}
       <header className="flex items-center justify-between px-6 py-4 bg-[#0f172a] border-b border-slate-800 shadow-xl z-20">
         <div className="flex items-center gap-6 w-1/3">
           <div className="flex flex-col">
@@ -232,14 +239,11 @@ export default function LiquidityDashboard() {
         </div>
       </header>
 
-      {/* --- SPLIT MAIN AREA (50-50) --- */}
       <main className="flex-1 flex overflow-hidden bg-[#020617]">
-        {/* LEFT: TradingView Chart */}
         <section className="w-1/2 h-full border-r border-slate-800 relative">
           <TradingViewWidget />
         </section>
 
-        {/* RIGHT: Liquidity Map */}
         <section
           className={`w-1/2 h-full p-4 flex flex-col overflow-hidden ${cursorClass}`}
           onMouseDown={handleMouseDown}
@@ -252,15 +256,11 @@ export default function LiquidityDashboard() {
 
                 <XAxis
                   type="number"
-                  domain={[-2, 2]} // ลดสูงสุดเหลือ 2% ตามโจทย์
+                  domain={[-2, 2]} 
                   stroke="#475569"
                   fontSize={10}
                   ticks={[-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2]}
-                  tickFormatter={(v) => {
-                    const absV = Math.abs(v);
-                    if (v === 0) return "0%";
-                    return `${absV}%`;
-                  }}
+                  tickFormatter={(v) => `${Math.abs(v)}%`}
                   axisLine={false}
                   tickLine={false}
                 />
@@ -279,7 +279,6 @@ export default function LiquidityDashboard() {
 
                 <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
 
-                {/* ราคาปัจจุบัน */}
                 {rawPayload && (
                   <ReferenceLine
                     y={rawPayload.price.toFixed(2)}
@@ -291,29 +290,28 @@ export default function LiquidityDashboard() {
                   />
                 )}
 
-                {/* เส้นแกนกลาง 0% */}
                 <ReferenceLine x={0} stroke="#475569" strokeWidth={2} />
 
-                {/* --- คลื่น (AREA) วาดแยกฝั่งที่ระยะ 1.0 --- */}
+                {/* --- AREA WAVES (แก้ไข baseValue เป็นตัวเลข) --- */}
                 <Area
-                  type="monotone" dataKey="posLongWave" baseValue="rightBase" stroke="#10b981" fill="#10b981" fillOpacity={0.05} strokeWidth={3}
+                  type="monotone" dataKey="posLongWave" baseValue={1.0} stroke="#10b981" fill="#10b981" fillOpacity={0.05} strokeWidth={3}
                   opacity={focusMode === 'pending' ? 0 : 0.8} isAnimationActive={false} connectNulls
                 />
                 <Area
-                  type="monotone" dataKey="ordLongWave" baseValue="rightBase" stroke="#34d399" fill="none" strokeWidth={2} strokeDasharray="5 5"
+                  type="monotone" dataKey="ordLongWave" baseValue={1.0} stroke="#34d399" fill="none" strokeWidth={2} strokeDasharray="5 5"
                   opacity={focusMode === 'position' ? 0 : 0.6} isAnimationActive={false} connectNulls
                 />
 
                 <Area
-                  type="monotone" dataKey="posShortWave" baseValue="leftBase" stroke="#ef4444" fill="#ef4444" fillOpacity={0.05} strokeWidth={3}
+                  type="monotone" dataKey="posShortWave" baseValue={-1.0} stroke="#ef4444" fill="#ef4444" fillOpacity={0.05} strokeWidth={3}
                   opacity={focusMode === 'pending' ? 0 : 0.8} isAnimationActive={false} connectNulls
                 />
                 <Area
-                  type="monotone" dataKey="ordShortWave" baseValue="leftBase" stroke="#f87171" fill="none" strokeWidth={2} strokeDasharray="5 5"
+                  type="monotone" dataKey="ordShortWave" baseValue={-1.0} stroke="#f87171" fill="none" strokeWidth={2} strokeDasharray="5 5"
                   opacity={focusMode === 'position' ? 0 : 0.6} isAnimationActive={false} connectNulls
                 />
 
-                {/* --- กราฟแท่ง (BAR) ตรงกลาง --- */}
+                {/* --- BARS --- */}
                 <Bar dataKey="posLong" fill="#10b981" barSize={12} opacity={focusMode === 'pending' ? 0.2 : 0.8} isAnimationActive={false} />
                 <Bar dataKey="posShort" fill="#ef4444" barSize={12} opacity={focusMode === 'pending' ? 0.2 : 0.8} isAnimationActive={false} />
                 <Bar dataKey="ordLong" fill="#34d399" barSize={12} opacity={focusMode === 'position' ? 0.2 : 0.8} isAnimationActive={false} />
