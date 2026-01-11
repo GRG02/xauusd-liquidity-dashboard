@@ -182,20 +182,23 @@ export default function LiquidityDashboard() {
           <div className="h-[1px] bg-slate-700 my-2" />
           {payload.map((entry: any, index: number) => {
             const val = Math.abs(entry.value).toFixed(2);
-            if (val === "0.00" || entry.dataKey.includes('Base')) return null;
-            if (entry.dataKey.includes('Wave')) {
-              const actualVal = Math.abs(parseFloat(val) - 1.0).toFixed(2);
-              if (actualVal === "0.00") return null;
-              return (
-                <p key={index} style={{ color: entry.color }} className="flex justify-between gap-4">
-                  <span>Wave ({entry.dataKey.includes('Long') ? "Buy" : "Sell"}):</span>
-                  <span className="font-bold">{actualVal}%</span>
-                </p>
-              );
-            }
+            
+            // --- เงื่อนไขการกรองข้อมูลใน Popup ---
+            // 1. ไม่แสดงค่า 0.00
+            // 2. ไม่แสดงเส้นฐาน (Base)
+            // 3. ไม่แสดงเส้นคลื่น (Wave) - แก้ไขตามที่คุณสั่ง
+            if (
+              val === "0.00" || 
+              entry.dataKey.includes('Base') || 
+              entry.dataKey.includes('Wave')
+            ) return null;
+
             return (
               <p key={index} style={{ color: entry.color }} className="flex justify-between gap-4">
-                <span>{entry.dataKey.includes('pos') ? "Position" : "Order"} ({entry.dataKey.includes('Long') ? "Buy" : "Sell"}):</span>
+                <span>
+                  {entry.dataKey.includes('pos') ? "Position" : "Order"} 
+                  ({entry.dataKey.includes('Long') ? "Buy" : "Sell"}):
+                </span>
                 <span className="font-bold">{val}%</span>
               </p>
             );
