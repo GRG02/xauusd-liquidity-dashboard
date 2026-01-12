@@ -88,46 +88,55 @@ export default function LiquidityDashboard() {
     const map = new Map();
     const minP = centerPrice - priceRange;
     const maxP = centerPrice + priceRange;
-    
-    // ระยะที่คลื่นลอยออกไป (Offset)
-    const sideOffset = 1.0; 
+    const sideOffset = 1.0;
 
+    // ฟังก์ชันช่วยจัดการข้อมูลเข้า Map
+    const getOrInit = (priceStr: string) => {
+      if (!map.has(priceStr)) {
+        map.set(priceStr, {
+          price: priceStr,
+          posLong: 0, posShort: 0,
+          posLongWave: sideOffset, posShortWave: -sideOffset,
+          rightBase: sideOffset, leftBase: -sideOffset,
+          ordLong: 0, ordShort: 0,
+          ordLongWave: sideOffset, ordShortWave: -sideOffset
+        });
+      }
+      return map.get(priceStr)!;
+    };
+
+    // 1. วนลูปข้อมูล Position
     rawPayload.pos.buckets_data?.forEach((b: any) => {
-      if (b.price >= minP - 0.5 && b.price <= maxP + 0.5) {
-        const p = parseFloat(b.price).toFixed(2);
+      const pNum = parseFloat(b.price);
+      if (pNum >= minP - 0.5 && pNum <= maxP + 0.5) {
+        const pStr = pNum.toFixed(2);
+        const item = getOrInit(pStr);
         const pL = parseFloat(b.longCountPercent) || 0;
         const pS = -parseFloat(b.shortCountPercent) || 0;
-        map.set(p, { 
-          price: p, 
-          posLong: pL, 
-          posShort: pS,
-          posLongWave: sideOffset + pL, 
-          posShortWave: -sideOffset + pS,
-          rightBase: sideOffset, // สำหรับวาดเส้นฐานฝั่งขวา
-          leftBase: -sideOffset,  // สำหรับวาดเส้นฐานฝั่งซ้าย
-          ordLong: 0, 
-          ordShort: 0,
-          ordLongWave: sideOffset, 
-          ordShortWave: -sideOffset
-        });
+
+        item.posLong = pL;
+        item.posShort = pS;
+        item.posLongWave = sideOffset + pL;
+        item.posShortWave = -sideOffset + pS;
       }
     });
 
+    // 2. วนลูปข้อมูล Order (เพิ่มราคาที่ไม่มีใน Position เข้าไปด้วย)
     rawPayload.ord.buckets_data?.forEach((b: any) => {
-      const p = parseFloat(b.price).toFixed(2);
-      if (map.has(p)) {
-        const existing = map.get(p)!;
+      const pNum = parseFloat(b.price);
+      if (pNum >= minP - 0.5 && pNum <= maxP + 0.5) {
+        const pStr = pNum.toFixed(2);
+        const item = getOrInit(pStr); // ถ้ายังไม่มีราคาใน Map (จาก Position) จะสร้างใหม่ที่นี่
         const oL = parseFloat(b.longCountPercent) || 0;
         const oS = -parseFloat(b.shortCountPercent) || 0;
-        map.set(p, { 
-          ...existing, 
-          ordLong: oL, 
-          ordShort: oS,
-          ordLongWave: sideOffset + oL,
-          ordShortWave: -sideOffset + oS
-        });
+
+        item.ordLong = oL;
+        item.ordShort = oS;
+        item.ordLongWave = sideOffset + oL;
+        item.ordShortWave = -sideOffset + oS;
       }
     });
+
     return Array.from(map.values()).sort((a: any, b: any) => parseFloat(b.price) - parseFloat(a.price));
   }, [rawPayload, centerPrice, priceRange]);
 
@@ -182,21 +191,21 @@ export default function LiquidityDashboard() {
           <div className="h-[1px] bg-slate-700 my-2" />
           {payload.map((entry: any, index: number) => {
             const val = Math.abs(entry.value).toFixed(2);
-            
+
             // --- เงื่อนไขการกรองข้อมูลใน Popup ---
             // 1. ไม่แสดงค่า 0.00
             // 2. ไม่แสดงเส้นฐาน (Base)
             // 3. ไม่แสดงเส้นคลื่น (Wave) - แก้ไขตามที่คุณสั่ง
             if (
-              val === "0.00" || 
-              entry.dataKey.includes('Base') || 
+              val === "0.00" ||
+              entry.dataKey.includes('Base') ||
               entry.dataKey.includes('Wave')
             ) return null;
 
             return (
               <p key={index} style={{ color: entry.color }} className="flex justify-between gap-4">
                 <span>
-                  {entry.dataKey.includes('pos') ? "Position" : "Order"} 
+                  {entry.dataKey.includes('pos') ? "Position" : "Order"}
                   ({entry.dataKey.includes('Long') ? "Buy" : "Sell"}):
                 </span>
                 <span className="font-bold">{val}%</span>
@@ -259,7 +268,7 @@ export default function LiquidityDashboard() {
 
                 <XAxis
                   type="number"
-                  domain={[-2, 2]} 
+                  domain={[-2, 2]}
                   stroke="#475569"
                   fontSize={10}
                   ticks={[-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2]}
