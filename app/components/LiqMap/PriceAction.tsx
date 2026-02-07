@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, ColorType, CandlestickSeries, IChartApi, ISeriesApi } from 'lightweight-charts';
 import { priceManager, TickData } from '../../utils/priceDataProvider';
-import { historyManager, BinData } from '../../utils/historyData';
+import { historyManager, BinData } from '../../utils/historyDataProvider';
 import { ZoneCoordinator } from '../../utils/zoneCoordinator'; 
 
 // --- Interface สำหรับ Zone Data ---
@@ -24,8 +24,9 @@ export const PriceAction = () => {
   // 🛡️ Safety Flag สำหรับป้องกัน Error: Object is disposed
   const isMounted = useRef(true);
 
-  // 🔥 เปลี่ยน selection เป็น Ref เพื่อแก้ปัญหาจอกระพริบ (Selection won't trigger re-render)
+  // 🔥 ใช้ Ref เก็บพิกัดเมาส์แทน State เพื่อแก้ปัญหาจอกระพริบตอนลาก
   const selectionRef = useRef<{ yStart: number; yCurrent: number } | null>(null);
+  
   const [isSelecting, setIsSelecting] = useState(false);
   const [zoneProfile, setZoneProfile] = useState<ZoneProfileData | null>(null);
 
@@ -35,7 +36,7 @@ export const PriceAction = () => {
     return Math.floor(Date.now() / 1000);
   };
 
-  // --- 🎨 1. ฟังก์ชันวาด Canvas (Footprint เดิม + Selection Box + Zone Profile) ---
+  // --- 🎨 1. ฟังก์ชันวาด Canvas ---
   const renderCanvas = useCallback(() => {
     if (!isMounted.current || !canvasRef.current || !chartRef.current || !seriesRef.current) return;
 
@@ -46,42 +47,43 @@ export const PriceAction = () => {
       const ctx = canvas?.getContext('2d');
       if (!canvas || !ctx) return;
 
-      // ล้างกระดาน
+      // 🧹 ล้างกระดาน
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const timeScale = chartRef.current.timeScale();
       const seriesData = (seriesRef.current as any).data();
       if (seriesData.length === 0) return;
 
-      const pTop = seriesRef.current.priceToCoordinate(5001);
-      const pBottom = seriesRef.current.priceToCoordinate(5000);
-      const rowHeight = pTop !== null && pBottom !== null ? Math.abs(pBottom - pTop) : 20;
+      // 📏 คำนวณความสูงแถว (ใช้ 1.0 ตาม Logic Math.floor ของกัปตัน)
+      const pTopRef = seriesRef.current.priceToCoordinate(5001);
+      const pBottomRef = seriesRef.current.priceToCoordinate(5000);
+      const rowHeight = pTopRef !== null && pBottomRef !== null ? Math.abs(pBottomRef - pTopRef) : 20;
 
-      // --- 🏗️ ส่วนเพิ่ม: วาด Zone Profile (แสดงผลทางขวาเมื่อสแกนเสร็จ) ---
+      // --- 🏗️ 1. วาด Zone Profile (แสดงผลทางขวาเมื่อสแกนเสร็จ) ---
       if (zoneProfile) {
         const { max_vol, profile } = zoneProfile;
         Object.entries(profile).forEach(([price, data]) => {
           const y = seriesRef.current!.priceToCoordinate(Number(price) + 1);
           if (y === null) return;
-          const barWidth = (data.total / max_vol) * 150;
+          const barWidth = (data.total / max_vol) * 150; 
           ctx.fillStyle = 'rgba(251, 191, 36, 0.35)';
           ctx.fillRect(canvas.width - barWidth - 5, Math.floor(y), barWidth, Math.ceil(rowHeight));
         });
       }
 
-      // --- 🏗️ ส่วนเพิ่ม: วาด Selection Box (ดึงจาก Ref เพื่อความลื่นไหล) ---
+      // --- 🏗️ 2. วาด Selection Box (ดึงจาก Ref โดยตรง ไม่ผ่าน State เพื่อความลื่นไหล) ---
       const selection = selectionRef.current;
       if (selection) {
         const yTop = Math.min(selection.yStart, selection.yCurrent);
         const yHeight = Math.abs(selection.yStart - selection.yCurrent);
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.25)'; // เพิ่มความเข้มเล็กน้อย
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
         ctx.strokeStyle = '#38bdf8';
         ctx.lineWidth = 1;
         ctx.fillRect(0, yTop, canvas.width, yHeight);
         ctx.strokeRect(0, yTop, canvas.width, yHeight);
       }
 
-      // --- 📊 วาด Footprint (รักษาโค้ดเดิมของคุณไว้ 100%) ---
+      // --- 📊 3. วาด Footprint (Logic เดิมของกัปตัน 100%) ---
       Object.entries(footprintRef.current).forEach(([time, bins]) => {
         const unixTime = Math.floor(new Date(time).getTime() / 1000);
         let x = timeScale.timeToCoordinate(unixTime as any);
@@ -98,7 +100,10 @@ export const PriceAction = () => {
         const boxWidth = 50;
         const xPos = Math.floor(x);
 
-        let barTotal = 0, barBuy = 0, barSell = 0, lowestY = -1;
+        let barTotal = 0;
+        let barBuy = 0;
+        let barSell = 0;
+        let lowestY = -1;
 
         Object.entries(bins).forEach(([price, data]) => {
           const priceNum = Number(price);
@@ -111,6 +116,12 @@ export const PriceAction = () => {
           const yTop = Math.floor(yTopRaw);
           
           if (yTop + rowHeight > lowestY) lowestY = yTop + rowHeight;
+
+          // 🔥 เงื่อนไขปักธง 🚩 (Diagonal Imbalance)
+          const upperPrice = priceNum + 1;
+          const lowerPrice = priceNum - 1;
+          const isBuyWinner = bins[upperPrice] ? data.buy > bins[upperPrice].sell : false;
+          const isSellWinner = bins[lowerPrice] ? data.sell > bins[lowerPrice].buy : false;
 
           // วาดกล่องพื้นหลัง
           ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
@@ -129,11 +140,13 @@ export const PriceAction = () => {
           ctx.fillStyle = '#ffffff'; 
           
           ctx.textAlign = 'right';
-          ctx.fillText(Math.round(data.buy).toString(), xPos - 4, yTop + rowHeight / 2);
+          ctx.fillText(Math.round(data.buy).toString() + (isBuyWinner ? '🚩' : ''), xPos - 4, yTop + rowHeight / 2);
+          
           ctx.textAlign = 'left';
-          ctx.fillText(Math.round(data.sell).toString(), xPos + 4, yTop + rowHeight / 2);
+          ctx.fillText((isSellWinner ? '🚩' : '') + Math.round(data.sell).toString(), xPos + 4, yTop + rowHeight / 2);
         });
 
+        // --- 🟢 วาด Summary (Delta & Total) ---
         if (lowestY !== -1) {
           const barDelta = barBuy - barSell;
           const summaryY = lowestY + 12;
@@ -150,9 +163,9 @@ export const PriceAction = () => {
         }
       });
     });
-  }, [zoneProfile]); // ลด Dependencies เพื่อไม่ให้ Re-render ขัดจังหวะการลากเมาส์
+  }, [zoneProfile]); // ลด Dependency เหลือแค่ zoneProfile ไม่ใส่ selectionRef เพื่อป้องกัน Re-render
 
-  // --- 🖱️ 2. Mouse Handlers สำหรับ Zone Scanner ---
+  // --- 🖱️ 2. Mouse Handlers (ใช้ Ref เพื่อแก้จอกระพริบ) ---
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!isSelecting) return;
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -167,18 +180,18 @@ export const PriceAction = () => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     selectionRef.current.yCurrent = e.clientY - rect.top;
-    renderCanvas(); // วาดกล่องสดๆ ลง Canvas โดยไม่ผ่าน State (แก้ปัญหาจอกระพริบ)
+    renderCanvas(); // วาดกล่องสดๆ ลง Canvas ทันที
   };
 
   const handleMouseUp = async () => {
-    const currentSelection = selectionRef.current;
-    if (!currentSelection || !seriesRef.current) {
+    const selection = selectionRef.current;
+    if (!selection || !seriesRef.current) {
       selectionRef.current = null;
       return;
     }
 
-    const p1 = seriesRef.current.coordinateToPrice(currentSelection.yStart);
-    const p2 = seriesRef.current.coordinateToPrice(currentSelection.yCurrent);
+    const p1 = seriesRef.current.coordinateToPrice(selection.yStart);
+    const p2 = seriesRef.current.coordinateToPrice(selection.yCurrent);
 
     if (p1 !== null && p2 !== null) {
       const top = Math.max(p1, p2);
@@ -205,7 +218,7 @@ export const PriceAction = () => {
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
       timeScale: { 
-        timeVisible: true, 
+        timeVisible: true,  // ✅ บังคับให้แสดงเวลา
         secondsVisible: false,
         barSpacing: 25, 
         rightOffset: 30, 
@@ -267,10 +280,12 @@ export const PriceAction = () => {
       const price = tick.bid;
       const lastBar = (seriesRef.current as any).data().at(-1);
       const barTime = Math.floor(Date.now() / 1000 / 60) * 60;
-      const date = new Date(barTime * 1000);
-      const timeStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:00`;
+      
+      if (tick.updates) {
+        const date = new Date(barTime * 1000);
+        // Format เวลาให้เป็น Key สำหรับ Footprint Map
+        const timeStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:00`;
 
-      if (tick.updates && tick.updates.length > 0) {
         if (!footprintRef.current[timeStr]) footprintRef.current[timeStr] = {};
         tick.updates.forEach(u => {
           const snappedPrice = Math.floor(u.bin);
